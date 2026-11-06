@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>夜市彈珠台</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee&family=Noto+Sans+TC:wght@500;900&display=swap">
+<style>
+/* Layout: one-screen arcade cabinet — wooden board centered, HUD above, launch control below */
+:root{
+  --night:#1d1530;      /* page ground: night-market sky */
+  --wood:#8a4b22;       /* cabinet frame */
+  --wood-dark:#5a2c12;
+  --face:#f3e3bf;       /* painted board face */
+  --lantern:#e8432e;    /* red lantern accent */
+  --brass:#d9a441;
+  --ink:#fff5e2;
+  --muted:#b9a8d6;
+  --display:"Bungee","Noto Sans TC",system-ui,sans-serif;
+  --body:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+  color-scheme:dark;
+}
+html,body{height:100%}
+body{margin:0;
+  background:radial-gradient(ellipse at 50% -10%,#3b2457 0%,var(--night) 60%);
+  background-color:var(--night);
+  color:var(--ink);font-family:var(--body);
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-block:12px;
+  display:flex;flex-direction:column;align-items:center;gap:10px;
+  user-select:none;-webkit-user-select:none;overflow-x:hidden;
+}
+header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;justify-content:center}
+h1{font-weight:900;font-size:1.6rem;margin:0;letter-spacing:.12em;color:var(--ink);
+  text-shadow:0 0 12px rgba(232,67,46,.7)}
+.sub{color:var(--muted);font-size:.85rem}
+.hud{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:min(100%,400px)}
+.stat{background:rgba(0,0,0,.28);border:1px solid rgba(217,164,65,.35);border-radius:8px;padding:6px 10px}
+.stat .k{font-size:.7rem;color:var(--muted);letter-spacing:.1em}
+.stat .v{font-family:var(--display);font-size:1.3rem;color:var(--brass);font-variant-numeric:tabular-nums}
+.board-wrap{position:relative;width:min(100%,400px,calc((100dvh - 230px) * 360 / 620));max-width:100%}
+canvas{display:block;width:100%;height:auto;aspect-ratio:360/620;border-radius:22px 22px 10px 10px;
+  box-shadow:0 18px 40px rgba(0,0,0,.55);touch-action:none}
+.overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
+  background:rgba(29,21,48,.78);border-radius:22px 22px 10px 10px;text-align:center;padding:20px}
+.overlay h2{margin:0;font-weight:900;font-size:1.5rem}
+.overlay p{margin:0;color:var(--muted);max-width:26ch;line-height:1.6}
+.overlay .big{font-family:var(--display);font-size:2.4rem;color:var(--brass)}
+.controls{display:flex;gap:10px;align-items:center;width:min(100%,400px)}
+.meter{flex:1;height:14px;border-radius:7px;background:rgba(0,0,0,.35);border:1px solid rgba(217,164,65,.35);overflow:hidden}
+.meter i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--brass),var(--lantern))}
+button{font-family:var(--body);font-weight:900;font-size:1rem;color:var(--ink);background:var(--lantern);
+  border:0;border-radius:10px;padding:12px 18px;cursor:pointer;box-shadow:0 4px 0 #8f2316;touch-action:none}
+button:active,button.held{transform:translateY(3px);box-shadow:0 1px 0 #8f2316}
+button:focus-visible{outline:3px solid var(--brass);outline-offset:2px}
+.hint{font-size:.78rem;color:var(--muted);text-align:center}
+.toast{position:absolute;left:50%;top:38%;transform:translate(-50%,-50%);font-family:var(--display);font-size:2rem;
+  color:var(--brass);text-shadow:0 2px 0 var(--wood-dark);pointer-events:none;opacity:0;transition:opacity .2s}
+.toast.show{opacity:1}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>夜市彈珠台</h1>
+  <span class="sub">拉桿發射，彈珠掉進格子得分</span>
+</header>
+
+<div class="hud">
+  <div class="stat"><div class="k">分數</div><div class="v" id="score">0</div></div>
+  <div class="stat"><div class="k">剩餘彈珠</div><div class="v" id="left">10</div></div>
+  <div class="stat"><div class="k">最高分</div><div class="v" id="best">0</div></div>
+</div>
+
+<div class="board-wrap">
+  <canvas id="c" width="360" height="620" aria-label="彈珠台遊戲畫面"></canvas>
+  <div class="toast" id="toast"></div>
+  <div class="overlay" id="overlay">
+    <h2 id="ovTitle">一局 10 顆彈珠</h2>
+    <div class="big" id="ovScore" hidden>0</div>
+    <p id="ovText">按住「拉桿」蓄力，放開發射。力道不夠，彈珠會滑回來，可以再拉一次。</p>
+    <button id="startBtn">開始</button>
+  </div>
+</div>
+
+<div class="controls">
+  <div class="meter" aria-hidden="true"><i id="meter"></i></div>
+  <button id="pull" aria-label="按住蓄力，放開發射">拉桿</button>
+</div>
+<div class="hint">空白鍵也能拉桿 · 中央杯 500 · 兩側杯 200 · 紅色彈墊會彈開彈珠</div>
+
+<script>
+(() => {
+  const W = 360, H = 620;
+  const cv = document.getElementById('c');
+  const ctx = cv.getContext('2d');
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  cv.width = W * dpr; cv.height = H * dpr;
+  ctx.scale(dpr, dpr);
+
+  // --- geometry ---
+  const G = 900, R_BALL = 6.5;
+  const CX = 180, CY = 190, RAD = 168;       // top arch
+  const LEFT = 12, DIV_X = 316, DIV_W = 5;   // field | shooter lane divider
+  const LANE_X = 334, LANE_REST = 588;
+  const SLOT_TOP = 532, BOTTOM = 604;
+  const SLOT_VALUES = [50, 10, 20, 100, 20, 10, 50];
+  const slotW = (DIV_X - LEFT) / SLOT_VALUES.length;
+
+  const pockets = [
+    { x: 168, y: 262, v: 500, r: 10 },
+    { x: 84,  y: 380, v: 200, r: 10 },
+    { x: 252, y: 380, v: 200, r: 10 },
+  ];
+
+  // round bumpers: kick the marble away harder than it arrived
+  const bumpers = [
+    { x: 118, y: 300, r: 10 }, { x: 218, y: 300, r: 10 },
+    { x: 168, y: 440, r: 10 }, { x: 60, y: 470, r: 9 }, { x: 276, y: 470, r: 9 },
+  ];
+  const pins = [];
+  for (let row = 0, y = 225; y <= 508; row++, y += 22) {
+    // even rows start 10px from the wall so no free channel runs down either side
+    for (let x = 22 + (row % 2) * 15; x <= 306; x += 30) {
+      if (pockets.some(p => Math.hypot(p.x - x, p.y - y) < 22)) continue;
+      if (bumpers.some(q => Math.hypot(q.x - x, q.y - y) < q.r + 13)) continue;
+      pins.push({ x, y, r: 3 });
+    }
+  }
+  pockets.forEach(p => {             // funnel pins beside each cup
+    pins.push({ x: p.x - 13, y: p.y - 4, r: 3 }, { x: p.x + 13, y: p.y - 4, r: 3 });
+  });
+  const dividers = [];
+  for (let i = 1; i < SLOT_VALUES.length; i++) dividers.push(LEFT + i * slotW);
+  dividers.forEach(x => pins.push({ x, y: SLOT_TOP, r: 2.5 }));
+
+  // drop any pin that would leave a gap narrower than a marble (it could wedge there)
+  for (let i = pins.length - 1; i >= 0; i--) {
+    const a = pins[i];
+    if (pins.some((b, j) => j < i && Math.hypot(a.x - b.x, a.y - b.y) < 2 * R_BALL + a.r + b.r + 1 && Math.hypot(a.x - b.x, a.y - b.y) > 0.1)) pins.splice(i, 1);
+  }
+
+  // --- state ---
+  let balls = [], score = 0, left = 10, best = 0, playing = false;
+  let charging = false, power = 0;
+  let flashes = [];
+  try { best = +localStorage.getItem('marble-best') || 0; } catch (e) {}
+
+  const $ = id => document.getElementById(id);
+  const hud = () => { $('score').textContent = score; $('left').textContent = left; $('best').textContent = best; };
+
+  // --- sound (starts after first interaction) ---
+  let ac = null, lastTick = 0;
+  function beep(freq, dur, vol = 0.04, type = 'triangle') {
+    if (!ac) return;
+    const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain();
+    o.type = type; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(ac.destination); o.start(t); o.stop(t + dur);
+  }
+  function unlockAudio() {
+    if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (ac && ac.state === 'suspended') ac.resume();
+  }
+
+  function laneBall() { return balls.find(b => b.state === 'lane'); }
+  function loadBall() {
+    if (left > 0 && !laneBall()) {
+      left--; balls.push({ x: LANE_X, y: LANE_REST, vx: 0, vy: 0, state: 'lane', still: 0, hue: Math.random() * 360 });
+      hud();
+    }
+  }
+
+  function toast(text) {
+    const t = $('toast'); t.textContent = text; t.classList.add('show');
+    clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove('show'), 700);
+  }
+  function award(v, x, y) {
+    score += v; hud(); flashes.push({ x, y, v, t: 0 });
+    if (v >= 200) { toast('+' + v); beep(660, .12, .06, 'square'); setTimeout(() => beep(990, .2, .06, 'square'), 110); }
+    else beep(440 + v * 3, .15, .05);
+  }
+
+  // --- physics ---
+  function collideCircle(b, px, py, pr, e) {
+    const dx = b.x - px, dy = b.y - py, d = Math.hypot(dx, dy), min = R_BALL + pr;
+    if (d >= min || d === 0) return false;
+    const nx = dx / d, ny = dy / d;
+    b.x = px + nx * min; b.y = py + ny * min;
+    const vn = b.vx * nx + b.vy * ny;
+    if (vn < 0) {
+      b.vx -= (1 + e) * vn * nx; b.vy -= (1 + e) * vn * ny;
+      b.vx += (Math.random() - .5) * 60;  // jitter so paths vary and balls never balance on a pin
+      return -vn;
+    }
+    return false;
+  }
+
+  function step(b, dt) {
+    b.vy += G * dt;
+    const sp = Math.hypot(b.vx, b.vy);
+    if (sp > 1400) { b.vx *= 1400 / sp; b.vy *= 1400 / sp; }
+    b.x += b.vx * dt; b.y += b.vy * dt;
+
+    // arch
+    if (b.y < CY) {
+      const dx = b.x - CX, dy = b.y - CY, d = Math.hypot(dx, dy), lim = RAD - R_BALL;
+      if (d > lim) {
+        const nx = dx / d, ny = dy / d;
+        b.x = CX + nx * lim; b.y = CY + ny * lim;
+        const vn = b.vx * nx + b.vy * ny;
+        if (vn > 0) { b.vx -= 1.15 * vn * nx; b.vy -= 1.15 * vn * ny; }
+        // left half of the arch has a springy rim: push the marble off it into the pins
+        if (b.state === 'field' && b.x < CX - 40) { b.vx -= nx * 140; b.vy -= ny * 140; }
+      }
+    }
+
+    if (b.state === 'lane') {
+      if (b.y >= CY) { b.x = LANE_X; b.vx = 0; }
+      const rest = LANE_REST + (charging ? power * 26 : 0);
+      if (b.y >= rest && b.vy >= 0) { b.y = rest; b.vy = 0; }
+      if (b.x < DIV_X - 4) b.state = 'field';
+      return;
+    }
+
+    // field walls
+    if (b.x < LEFT + R_BALL) { b.x = LEFT + R_BALL; b.vx = Math.abs(b.vx) * 0.7 + 20; }
+    if (b.y > CY - 60 && b.x > DIV_X - R_BALL) { b.x = DIV_X - R_BALL; b.vx = -Math.abs(b.vx) * 0.7 - 20; }
+
+    for (const p of pins) {
+      const hit = collideCircle(b, p.x, p.y, p.r, 0.68);
+      if (hit && hit > 120) {
+        const now = performance.now();
+        if (now - lastTick > 35) { lastTick = now; beep(1800 + Math.random() * 600, .03, Math.min(.03, hit / 20000)); }
+      }
+    }
+
+    for (const q of bumpers) {
+      const dx = b.x - q.x, dy = b.y - q.y, d = Math.hypot(dx, dy), min = R_BALL + q.r;
+      if (d < min && d > 0) {
+        const nx = dx / d, ny = dy / d;
+        b.x = q.x + nx * min; b.y = q.y + ny * min;
+        const vn = b.vx * nx + b.vy * ny;
+        if (vn < 0) {
+          b.vx -= 2 * vn * nx; b.vy -= 2 * vn * ny;
+          b.vx += nx * 160; b.vy += ny * 160;   // extra kick
+          q.flash = 0.15; beep(520 + Math.random() * 80, .08, .05, 'square');
+        }
+      }
+    }
+
+    if (b.y > SLOT_TOP) {
+      for (const x of dividers) {
+        if (Math.abs(b.x - x) < R_BALL + 1.5) {
+          const s = b.x < x ? -1 : 1;
+          b.x = x + s * (R_BALL + 1.5); b.vx = s * Math.abs(b.vx) * 0.4;
+        }
+      }
+    }
+
+    for (const p of pockets) {
+      if (Math.hypot(b.x - p.x, b.y - p.y) < p.r - 5 && b.vy > 0) { b.done = true; award(p.v, p.x, p.y); return; }
+    }
+
+    if (b.y > BOTTOM - R_BALL) {
+      const i = Math.max(0, Math.min(SLOT_VALUES.length - 1, Math.floor((b.x - LEFT) / slotW)));
+      b.done = true; award(SLOT_VALUES[i], LEFT + (i + .5) * slotW, BOTTOM - 20); return;
+    }
+
+    // stuck guard
+    if (Math.hypot(b.vx, b.vy) < 8) { b.still += dt; if (b.still > 1.2) { b.vy -= 220; b.vx += (Math.random() < .5 ? -1 : 1) * (120 + Math.random() * 160); b.still = 0; } }
+    else b.still = 0;
+  }
+
+  // --- drawing ---
+  function roundTopPath() {
+    ctx.beginPath();
+    ctx.moveTo(LEFT - 6, H);
+    ctx.lineTo(LEFT - 6, CY);
+    ctx.arc(CX, CY, RAD + 6, Math.PI, 0);
+    ctx.lineTo(CX + RAD + 6, H);
+    ctx.closePath();
+  }
+  function drawBoard() {
+    const wood = ctx.createLinearGradient(0, 0, W, 0);
+    wood.addColorStop(0, '#5a2c12'); wood.addColorStop(.5, '#8a4b22'); wood.addColorStop(1, '#5a2c12');
+    ctx.fillStyle = wood; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(0,0,0,.15)'; ctx.lineWidth = 1;
+    for (let y = 8; y < H; y += 11) { ctx.beginPath(); ctx.moveTo(0, y); ctx.bezierCurveTo(120, y + 4, 240, y - 4, W, y + 2); ctx.stroke(); }
+
+    roundTopPath();
+    const face = ctx.createRadialGradient(CX, 260, 40, CX, 320, 380);
+    face.addColorStop(0, '#fbefd2'); face.addColorStop(1, '#e8d2a2');
+    ctx.fillStyle = face; ctx.fill();
+
+    // painted sunburst behind the jackpot cup
+    ctx.save(); roundTopPath(); ctx.clip();
+    for (let i = 0; i < 24; i++) {
+      ctx.fillStyle = i % 2 ? 'rgba(232,67,46,.07)' : 'rgba(217,164,65,.08)';
+      ctx.beginPath(); ctx.moveTo(168, 262);
+      ctx.arc(168, 262, 420, i * Math.PI / 12, (i + 1) * Math.PI / 12); ctx.fill();
+    }
+    ctx.restore();
+
+    ctx.fillStyle = '#c0392b'; ctx.font = '900 22px "Noto Sans TC", sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('好 運 彈 珠', CX, 120);
+    ctx.fillStyle = '#8a4b22'; ctx.font = '500 11px "Noto Sans TC", sans-serif';
+    ctx.fillText('一 顆 一 顆 慢 慢 打', CX, 140);
+
+    // divider & lane
+    ctx.fillStyle = '#6b3818'; ctx.fillRect(DIV_X, CY - 60, DIV_W, H - (CY - 60));
+    ctx.fillStyle = 'rgba(90,44,18,.18)'; ctx.fillRect(DIV_X + DIV_W, CY - 60, W - DIV_X - DIV_W - 4, H);
+
+    // slots
+    SLOT_VALUES.forEach((v, i) => {
+      const x = LEFT + i * slotW;
+      ctx.fillStyle = v >= 100 ? 'rgba(232,67,46,.85)' : (i % 2 ? 'rgba(217,164,65,.55)' : 'rgba(217,164,65,.3)');
+      ctx.fillRect(x + 1, SLOT_TOP + 26, slotW - 2, BOTTOM - SLOT_TOP - 26);
+      ctx.fillStyle = v >= 100 ? '#fff5e2' : '#5a2c12';
+      ctx.font = '13px Bungee, sans-serif';
+      ctx.fillText(v, x + slotW / 2, BOTTOM - 14);
+    });
+    ctx.strokeStyle = '#8f6a2a'; ctx.lineWidth = 3;
+    dividers.forEach(x => { ctx.beginPath(); ctx.moveTo(x, SLOT_TOP); ctx.lineTo(x, BOTTOM); ctx.stroke(); });
+    ctx.fillStyle = '#5a2c12'; ctx.fillRect(LEFT - 6, BOTTOM, DIV_X - LEFT + 6, H - BOTTOM);
+
+    // pockets
+    pockets.forEach(p => {
+      ctx.fillStyle = '#3a1a0a'; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = p.v >= 500 ? '#e8432e' : '#d9a441'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r + 2, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = p.v >= 500 ? '#c0392b' : '#8a4b22'; ctx.font = '11px Bungee, sans-serif';
+      ctx.fillText(p.v, p.x, p.y + p.r + 15);
+    });
+
+    // pins
+    pins.forEach(p => {
+      ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.arc(p.x + 1, p.y + 1.5, p.r, 0, Math.PI * 2); ctx.fill();
+      const g = ctx.createRadialGradient(p.x - 1, p.y - 1, .5, p.x, p.y, p.r);
+      g.addColorStop(0, '#fff3c4'); g.addColorStop(1, '#b07d22');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+    });
+
+    // bumpers
+    bumpers.forEach(q => {
+      const lit = (q.flash || 0) > 0;
+      ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.arc(q.x + 1.5, q.y + 2, q.r, 0, Math.PI * 2); ctx.fill();
+      const g = ctx.createRadialGradient(q.x - 3, q.y - 3, 1, q.x, q.y, q.r);
+      g.addColorStop(0, lit ? '#fff5e2' : '#ff8a6e'); g.addColorStop(1, lit ? '#ff6a4a' : '#b5281a');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(q.x, q.y, q.r, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#d9a441'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(q.x, q.y, q.r, 0, Math.PI * 2); ctx.stroke();
+    });
+
+    // arch rim
+    ctx.strokeStyle = '#d9a441'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(CX, CY, RAD + 4, Math.PI, 0); ctx.stroke();
+
+    // plunger
+    const py = LANE_REST + R_BALL + (charging ? power * 26 : 0);
+    ctx.fillStyle = '#c9c9d1'; ctx.fillRect(LANE_X - 2, py, 4, H - py);
+    ctx.fillStyle = '#e8432e'; ctx.fillRect(LANE_X - 9, py, 18, 6);
+    ctx.strokeStyle = '#999'; ctx.lineWidth = 1.5; ctx.beginPath();
+    for (let y = py + 8; y < H - 2; y += 4) { ctx.moveTo(LANE_X - 6, y); ctx.lineTo(LANE_X + 6, y + 2); }
+    ctx.stroke();
+  }
+  function drawBall(b) {
+    ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.arc(b.x + 1.5, b.y + 2.5, R_BALL, 0, Math.PI * 2); ctx.fill();
+    const g = ctx.createRadialGradient(b.x - 2, b.y - 2, 1, b.x, b.y, R_BALL);
+    g.addColorStop(0, '#ffffff'); g.addColorStop(.35, `hsla(${b.hue},70%,70%,.9)`); g.addColorStop(1, `hsl(${b.hue},60%,35%)`);
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(b.x, b.y, R_BALL, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.beginPath(); ctx.arc(b.x - 2.2, b.y - 2.4, 1.6, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // --- loop ---
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.033, (now - last) / 1000); last = now;
+    if (charging) power = Math.min(1, power + dt * 0.9);
+    bumpers.forEach(q => { if (q.flash > 0) q.flash -= dt; });
+    $('meter').style.width = (power * 100) + '%';
+
+    const sub = 10, h = dt / sub;
+    for (let s = 0; s < sub; s++) for (const b of balls) if (!b.done) step(b, h);
+    balls = balls.filter(b => !b.done);
+    if (playing && !laneBall()) loadBall();
+    if (playing && left === 0 && balls.length === 0) endGame();
+
+    drawBoard();
+    balls.forEach(drawBall);
+    flashes.forEach(f => {
+      f.t += dt;
+      ctx.globalAlpha = Math.max(0, 1 - f.t / .9);
+      ctx.fillStyle = '#c0392b'; ctx.font = '16px Bungee, sans-serif';
+      ctx.fillText('+' + f.v, f.x, f.y - f.t * 40);
+      ctx.globalAlpha = 1;
+    });
+    flashes = flashes.filter(f => f.t < .9);
+    requestAnimationFrame(frame);
+  }
+
+  // --- input ---
+  function press() {
+    unlockAudio();
+    if (!playing) return;
+    const b = laneBall();
+    if (!b || b.y < LANE_REST - 1) return;   // wait until the ball rests on the plunger
+    charging = true; power = 0; $('pull').classList.add('held');
+  }
+  function release() {
+    $('pull').classList.remove('held');
+    if (!charging) return;
+    charging = false;
+    const b = laneBall();
+    if (b) { b.vy = -(520 + power * 820); beep(180, .12, .05, 'sawtooth'); }
+    power = 0;
+  }
+  const pull = $('pull');
+  pull.addEventListener('pointerdown', e => { e.preventDefault(); try { pull.setPointerCapture(e.pointerId); } catch (_) {} press(); });
+  pull.addEventListener('pointerup', release);
+  pull.addEventListener('pointercancel', release);
+  cv.addEventListener('pointerdown', e => { e.preventDefault(); try { cv.setPointerCapture(e.pointerId); } catch (_) {} press(); });
+  cv.addEventListener('pointerup', release);
+  cv.addEventListener('pointercancel', release);
+  window.addEventListener('keydown', e => { if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) press(); } });
+  window.addEventListener('keyup', e => { if (e.code === 'Space') { e.preventDefault(); release(); } });
+
+  function startGame() {
+    unlockAudio();
+    balls = []; score = 0; left = 10; playing = true; flashes = [];
+    $('overlay').hidden = true; hud(); loadBall();
+  }
+  function endGame() {
+    playing = false;
+    const newBest = score > best;
+    if (newBest) { best = score; try { localStorage.setItem('marble-best', String(best)); } catch (e) {} }
+    hud();
+    $('ovTitle').textContent = newBest ? '新紀錄！' : '這局結束';
+    $('ovScore').hidden = false; $('ovScore').textContent = score;
+    $('ovText').textContent = '10 顆彈珠打完了。';
+    $('startBtn').textContent = '再玩一局';
+    $('overlay').hidden = false;
+  }
+  $('startBtn').addEventListener('click', startGame);
+
+  hud();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
